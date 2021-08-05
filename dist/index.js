@@ -59967,7 +59967,7 @@ exports.ConventionalCommits = ConventionalCommits;
 // See the License for the specific language governing permissions and
 // limitations under the License.
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.MissingReleaseNotesError = exports.DuplicateReleaseError = exports.AuthError = exports.GitHubAPIError = exports.PathNotFoundError = exports.MissingRequiredFileError = exports.ConfigurationError = void 0;
+exports.MissingReleaseNotesError = exports.DuplicateReleaseError = exports.AuthError = exports.GitHubAPIError = exports.MissingRequiredFileError = exports.ConfigurationError = void 0;
 class ConfigurationError extends Error {
     constructor(message, releaserName, repository) {
         super(`${releaserName} (${repository}): ${message}`);
@@ -59985,14 +59985,6 @@ class MissingRequiredFileError extends ConfigurationError {
     }
 }
 exports.MissingRequiredFileError = MissingRequiredFileError;
-class PathNotFoundError extends Error {
-    constructor(path) {
-        super(`Could not find requested path: ${path}`);
-        this.path = path;
-        this.name = PathNotFoundError.name;
-    }
-}
-exports.PathNotFoundError = PathNotFoundError;
 class GitHubAPIError extends Error {
     constructor(requestError, message) {
         super(message !== null && message !== void 0 ? message : requestError.message);
@@ -60710,7 +60702,7 @@ class GitHub {
                 return await this.getFileContentsWithSimpleAPI(path, branch);
             }
             catch (err) {
-                if (err.status === 403 || err.status === 404) {
+                if (err.status === 403) {
                     return await this.getFileContentsWithDataAPI(path, branch);
                 }
                 throw err;
@@ -61645,7 +61637,7 @@ class GitHub {
         const repoTree = await this.request('GET /repos/:owner/:repo/git/trees/:branch', options);
         const blobDescriptor = repoTree.data.tree.find(tree => tree.path === path);
         if (!blobDescriptor) {
-            throw new errors_1.PathNotFoundError(path);
+            throw new Error(`Could not find requested path: ${path}`);
         }
         const resp = await this.request('GET /repos/:owner/:repo/git/blobs/:sha', {
             owner: this.owner,
@@ -63261,7 +63253,6 @@ class ReleasePR {
     constructor(options) {
         var _a, _b, _c, _d;
         this.changelogPath = 'CHANGELOG.md';
-        this.enableSimplePrereleaseParsing = false;
         this.bumpMinorPreMajor = options.bumpMinorPreMajor || false;
         this.bumpPatchForMinorPreMajor = options.bumpPatchForMinorPreMajor || false;
         this.labels = (_a = options.labels) !== null && _a !== void 0 ? _a : constants_1.DEFAULT_LABELS;
@@ -63348,7 +63339,7 @@ class ReleasePR {
     }
     async _run() {
         const packageName = await this.getPackageName();
-        const latestTag = await this.latestTag(this.monorepoTags ? `${packageName.getComponent()}-` : undefined, this.enableSimplePrereleaseParsing);
+        const latestTag = await this.latestTag(this.monorepoTags ? `${packageName.getComponent()}-` : undefined);
         const commits = await this.commits({
             sha: latestTag ? latestTag.sha : undefined,
             path: this.path,
@@ -63401,7 +63392,7 @@ class ReleasePR {
         const re = new RegExp(`^(${tagPrefix}|)`);
         return versionOrTagName.replace(re, tagPrefix);
     }
-    async coerceReleaseCandidate(cc, latestTag, enableSimplePrereleaseParsing = false) {
+    async coerceReleaseCandidate(cc, latestTag, preRelease = false) {
         var _a, _b;
         const releaseAsRe = /release-as:\s*v?([0-9]+\.[0-9]+\.[0-9a-z]+(-[0-9a-z.]+)?)\s*/i;
         const previousTag = latestTag ? latestTag.name : undefined;
@@ -63426,7 +63417,7 @@ class ReleasePR {
         if (releaseAsCommit) {
             version = forcedVersion;
         }
-        else if (enableSimplePrereleaseParsing) {
+        else if (preRelease) {
             // Handle pre-release format v1.0.0-alpha1, alpha2, etc.
             const [prefix, suffix] = version.split('-');
             const match = suffix === null || suffix === void 0 ? void 0 : suffix.match(/(?<type>[^0-9]+)(?<number>[0-9]+)/);
@@ -63626,10 +63617,6 @@ class ReleasePR {
         // Consider any version with a '-' as a pre-release version
         if (!preRelease && version.indexOf('-') >= 0) {
             return null;
-        }
-        // Allow the '-' separator to be omitted.
-        if (preRelease && !version.includes('-') && version.match(/[a-zB-Z]/)) {
-            version = version.replace(/([a-zA-Z])/, '-$1');
         }
         return semver.valid(version);
     }
@@ -63879,10 +63866,6 @@ const release_pr_1 = __nccwpck_require__(86786);
 // Generic
 const changelog_1 = __nccwpck_require__(3325);
 class Go extends release_pr_1.ReleasePR {
-    constructor() {
-        super(...arguments);
-        this.enableSimplePrereleaseParsing = true;
-    }
     async buildUpdates(changelogEntry, candidate, packageName) {
         const updates = [];
         updates.push(new changelog_1.Changelog({
@@ -64247,10 +64230,11 @@ class JavaYoshi extends release_pr_1.ReleasePR {
                 this.versionsManifestContent = await this.gh.getFileContents('versions.txt');
             }
             catch (e) {
-                if ((e instanceof errors_1.GitHubAPIError && e.status === 404) ||
-                    e instanceof errors_1.PathNotFoundError) {
-                    // on missing file, throw a configuration error
-                    throw new errors_1.MissingRequiredFileError('versions.txt', JavaYoshi.name, this.gh.repo);
+                if (e instanceof errors_1.GitHubAPIError) {
+                    if (e.status === 404) {
+                        // on missing file, throw a configuration error
+                        throw new errors_1.MissingRequiredFileError('versions.txt', JavaYoshi.name, this.gh.repo);
+                    }
                 }
                 throw e;
             }
@@ -64802,10 +64786,6 @@ const package_json_1 = __nccwpck_require__(51805);
 const package_lock_json_1 = __nccwpck_require__(62159);
 const samples_package_json_1 = __nccwpck_require__(18562);
 class Node extends release_pr_1.ReleasePR {
-    constructor() {
-        super(...arguments);
-        this.enableSimplePrereleaseParsing = true;
-    }
     async buildUpdates(changelogEntry, candidate, packageName) {
         const updates = [];
         const lockFiles = ['package-lock.json', 'npm-shrinkwrap.json'];
@@ -65187,7 +65167,6 @@ class Python extends release_pr_1.ReleasePR {
     constructor(options) {
         var _a;
         super(options);
-        this.enableSimplePrereleaseParsing = true;
         this.changelogSections = (_a = options.changelogSections) !== null && _a !== void 0 ? _a : CHANGELOG_SECTIONS;
     }
     async buildUpdates(changelogEntry, candidate, packageName) {
@@ -85764,7 +85743,7 @@ module.exports = JSON.parse("[\"assert\",\"buffer\",\"child_process\",\"cluster\
 /***/ ((module) => {
 
 "use strict";
-module.exports = {"i8":"11.20.1"};
+module.exports = {"i8":"11.19.0"};
 
 /***/ }),
 
@@ -85772,7 +85751,7 @@ module.exports = {"i8":"11.20.1"};
 /***/ ((module) => {
 
 "use strict";
-module.exports = JSON.parse("{\"name\":\"strong-log-transformer\",\"version\":\"2.1.0\",\"description\":\"Stream transformer that prefixes lines with timestamps and other things.\",\"author\":\"Ryan Graham <ryan@strongloop.com>\",\"license\":\"Apache-2.0\",\"repository\":{\"type\":\"git\",\"url\":\"git://github.com/strongloop/strong-log-transformer\"},\"keywords\":[\"logging\",\"streams\"],\"bugs\":{\"url\":\"https://github.com/strongloop/strong-log-transformer/issues\"},\"homepage\":\"https://github.com/strongloop/strong-log-transformer\",\"directories\":{\"test\":\"test\"},\"bin\":{\"sl-log-transformer\":\"bin/sl-log-transformer.js\"},\"main\":\"index.js\",\"scripts\":{\"test\":\"tap --100 test/test-*\"},\"dependencies\":{\"duplexer\":\"^0.1.1\",\"minimist\":\"^1.2.0\",\"through\":\"^2.3.4\"},\"devDependencies\":{\"tap\":\"^12.0.1\"},\"engines\":{\"node\":\">=4\"},\"_resolved\":\"https://registry.npmjs.org/strong-log-transformer/-/strong-log-transformer-2.1.0.tgz\",\"_integrity\":\"sha512-B3Hgul+z0L9a236FAUC9iZsL+nVHgoCJnqCbN588DjYxvGXaXaaFbfmQ/JhvKjZwsOukuR72XbHv71Qkug0HxA==\",\"_from\":\"strong-log-transformer@2.1.0\"}");
+module.exports = JSON.parse("{\"name\":\"strong-log-transformer\",\"version\":\"2.1.0\",\"description\":\"Stream transformer that prefixes lines with timestamps and other things.\",\"author\":\"Ryan Graham <ryan@strongloop.com>\",\"license\":\"Apache-2.0\",\"repository\":{\"type\":\"git\",\"url\":\"git://github.com/strongloop/strong-log-transformer\"},\"keywords\":[\"logging\",\"streams\"],\"bugs\":{\"url\":\"https://github.com/strongloop/strong-log-transformer/issues\"},\"homepage\":\"https://github.com/strongloop/strong-log-transformer\",\"directories\":{\"test\":\"test\"},\"bin\":{\"sl-log-transformer\":\"bin/sl-log-transformer.js\"},\"main\":\"index.js\",\"scripts\":{\"test\":\"tap --100 test/test-*\"},\"dependencies\":{\"duplexer\":\"^0.1.1\",\"minimist\":\"^1.2.0\",\"through\":\"^2.3.4\"},\"devDependencies\":{\"tap\":\"^12.0.1\"},\"engines\":{\"node\":\">=4\"}}");
 
 /***/ }),
 
